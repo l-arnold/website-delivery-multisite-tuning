@@ -29,14 +29,23 @@ class SaleOrder(models.Model):
             _logger.warning(f"Order {self.id}: could not sync website context: {e}")
 
         address = self.partner_shipping_id
+        order_company = self.company_id
 
-        # Get all published carriers
+        # Get all published carriers, pre-filtered by company.
+        # Carriers with no company set are treated as available to all companies.
         all_carriers = self.env['delivery.carrier'].sudo().search([
-            ('website_published', '=', True)
+            ('website_published', '=', True),
+            '|',
+            ('company_id', '=', False),
+            ('company_id', '=', order_company.id),
         ])
-        _logger.info(f"Found {len(all_carriers)} published carriers BEFORE filtering")
+        _logger.info(
+            f"Found {len(all_carriers)} published carriers BEFORE filtering "
+            f"(company: {order_company.name}, id: {order_company.id})"
+        )
 
-        # Filter by website
+        # Filter by website within the company-filtered set.
+        # Carriers with no website assigned show on all websites for their company.
         if self.website_id:
             carriers = all_carriers.filtered(
                 lambda c: not c.website_id or c.website_id == self.website_id
