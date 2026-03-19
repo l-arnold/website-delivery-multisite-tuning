@@ -15,37 +15,37 @@ class SaleOrder(models.Model):
         # If the order's website doesn't match the current website context,
         # update it. This happens when a user navigates between sites while
         # carrying an existing session/order (e.g. nomadic.net → erp.nomadic.net).
+        # Only update if same company — cross-company sessions need a new order.
         try:
             current_website = self.env['website'].get_current_website()
             if current_website and self.website_id != current_website:
-                _logger.info(
-                    f"Order {self.id}: website mismatch — "
-                    f"order has website {self.website_id.id}, "
-                    f"current context is website {current_website.id}. Updating."
-                )
-                self.sudo().write({'website_id': current_website.id})
+                if current_website.company_id == self.company_id:
+                    _logger.info(
+                        f"Order {self.id}: website mismatch — "
+                        f"order has website {self.website_id.id}, "
+                        f"current context is website {current_website.id}. Updating."
+                    )
+                    self.sudo().write({'website_id': current_website.id})
+                else:
+                    _logger.warning(
+                        f"Order {self.id}: cross-company website mismatch — "
+                        f"order company {self.company_id.name} vs "
+                        f"website company {current_website.company_id.name}. "
+                        f"Not updating."
+                    )
         except Exception as e:
-            # Never block delivery method lookup due to website sync errors
             _logger.warning(f"Order {self.id}: could not sync website context: {e}")
 
         address = self.partner_shipping_id
-        order_company = self.company_id
 
-        # Get all published carriers, pre-filtered by company.
-        # Carriers with no company set are treated as available to all companies.
+        # Get all published carriers
         all_carriers = self.env['delivery.carrier'].sudo().search([
-            ('website_published', '=', True),
-            '|',
-            ('company_id', '=', False),
-            ('company_id', '=', order_company.id),
+            ('website_published', '=', True)
         ])
-        _logger.info(
-            f"Found {len(all_carriers)} published carriers BEFORE filtering "
-            f"(company: {order_company.name}, id: {order_company.id})"
-        )
+        _logger.info(f"Found {len(all_carriers)} published carriers BEFORE filtering")
 
-        # Filter by website within the company-filtered set.
-        # Carriers with no website assigned show on all websites for their company.
+        # Filter by website.
+        # Carriers with no website assigned show on all websites.
         if self.website_id:
             carriers = all_carriers.filtered(
                 lambda c: not c.website_id or c.website_id == self.website_id
