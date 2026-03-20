@@ -10,12 +10,14 @@ class SaleOrder(models.Model):
     def _get_delivery_methods(self):
         _logger.info("=" * 80)
         _logger.info("CUSTOM WEBSITE FILTER: _get_delivery_methods called")
-        _logger.info(f"Order ID: {self.id}, Website ID: {self.website_id.id if self.website_id else None}")
+        _logger.info(
+            f"Order ID: {self.id}, "
+            f"Website ID: {self.website_id.id if self.website_id else None}"
+        )
 
         # If the order's website doesn't match the current website context,
-        # update it. This happens when a user navigates between sites while
-        # carrying an existing session/order (e.g. nomadic.net → erp.nomadic.net).
-        # Only update if same company — cross-company sessions need a new order.
+        # update it. Only update if same company — cross-company sessions
+        # should not update (they need a fresh order).
         try:
             current_website = self.env['website'].get_current_website()
             if current_website and self.website_id != current_website:
@@ -42,10 +44,12 @@ class SaleOrder(models.Model):
         all_carriers = self.env['delivery.carrier'].sudo().search([
             ('website_published', '=', True)
         ])
-        _logger.info(f"Found {len(all_carriers)} published carriers BEFORE filtering")
+        _logger.info(
+            f"Found {len(all_carriers)} published carriers BEFORE filtering"
+        )
 
         # Filter by website.
-        # Carriers with no website assigned show on all websites.
+        # Carriers with no website assigned show on all websites for their company.
         if self.website_id:
             carriers = all_carriers.filtered(
                 lambda c: not c.website_id or c.website_id == self.website_id
@@ -61,4 +65,11 @@ class SaleOrder(models.Model):
         _logger.info(f"Carrier IDs: {carriers.ids}")
         _logger.info("=" * 80)
 
+        # Inject order_id into context so delivery_smart_packaging's
+        # available_carriers override can access the correct order for
+        # packaging dimension filtering.
+        # This must happen here rather than in delivery_smart_packaging's
+        # own _get_delivery_methods override to avoid MRO conflicts between
+        # the two modules both overriding the same method.
+        carriers = carriers.with_context(order_id=self)
         return carriers.available_carriers(address)
